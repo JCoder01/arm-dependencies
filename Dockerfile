@@ -92,6 +92,47 @@ RUN pip3 install --break-system-packages --ignore-installed --prefer-binary -r .
 ###########################################################
 # install makemkv and handbrake
 FROM deps-ripper AS install-makemkv-handbrake
+
+# Intel QuickSync (QSV) support: Ubuntu's own libva-dev is too old for FFmpeg's
+# QSV code, which gates VAAPI device-info support behind a *compile-time*
+# `#if VA_CHECK_VERSION(1, 15, 0)` check - so HandBrake must be built against a
+# newer libva-dev than the distro ships, or QSV silently no-ops at runtime.
+# Pull both the runtime driver and dev headers from Intel's own repo instead
+# (noble is the newest Ubuntu release Intel currently publishes for; these
+# userspace libs are compatible with newer bases):
+# https://dgpu-docs.intel.com/driver/client/overview.html
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gnupg wget ca-certificates && \
+    wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
+        gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg && \
+    echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble client" \
+        > /etc/apt/sources.list.d/intel-gpu.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        intel-media-va-driver-non-free \
+        libmfx-gen1 \
+        libvpl2 \
+        libva2 \
+        libva-dev \
+        libva-drm2 \
+        vainfo \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# HandBrake's statically-linked oneVPL dispatcher only reports QSV as
+# available if the legacy MSDK-compat runtime (libmfx1) is present too -
+# libmfx-gen1 alone isn't enough, confirmed by testing on real Intel hardware.
+# libmfx1 has no successor package in Intel's newer (noble) repo at all, so
+# pull it from their older jammy repo instead - it's still published there.
+RUN echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu jammy client" \
+        > /etc/apt/sources.list.d/intel-gpu-jammy.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends libmfx1 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The arm user is already in the video group; render is also needed for
+# /dev/dri/renderD128 access.
+RUN groupadd -f render && usermod -aG video,render arm
+
 COPY ./scripts/install_mkv_hb_deps.sh /install_mkv_hb_deps.sh
 RUN chmod +x /install_mkv_hb_deps.sh && sleep 1 && \
     /install_mkv_hb_deps.sh
