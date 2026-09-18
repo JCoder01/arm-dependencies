@@ -1,6 +1,6 @@
 ###########################################################
 # base image, used for build stages and final images
-FROM phusion/baseimage:jammy-1.0.4 AS base
+FROM phusion/baseimage:resolute-1.0.16 AS base
 RUN mkdir /opt/arm
 WORKDIR /opt/arm
 
@@ -9,6 +9,10 @@ RUN \
     apt clean && \
     apt update && \
     apt upgrade -y -o Dpkg::Options::="--force-confold"
+# newer Ubuntu base images ship a default "ubuntu" user/group at 1000; remove it
+# so we can use that id for our own arm user/group instead, same as before
+RUN userdel -r ubuntu 2>/dev/null || true
+
 # create an arm group(gid 1000) and an arm user(uid 1000), with password logon disabled
 RUN groupadd -g 1000 arm \
     && useradd -rm -d /home/arm -s /bin/bash -g arm -G video,cdrom -u 1000 arm
@@ -82,8 +86,8 @@ RUN \
 
 # install python reqs
 COPY requirements.txt ./requirements.txt
-RUN pip3 install --upgrade pip wheel setuptools psutil pyudev
-RUN pip3 install --ignore-installed --prefer-binary -r ./requirements.txt
+RUN pip3 install --break-system-packages --ignore-installed --upgrade pip wheel setuptools psutil pyudev
+RUN pip3 install --break-system-packages --ignore-installed --prefer-binary -r ./requirements.txt
 
 ###########################################################
 # install makemkv and handbrake
